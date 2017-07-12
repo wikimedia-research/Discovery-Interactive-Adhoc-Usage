@@ -1,0 +1,237 @@
+---
+title: "Wikimedia Maps usage on Wikimedia projects"
+author: "MPopov (WMF)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    mathjax: https://tools-static.wmflabs.org/cdnjs/ajax/libs/mathjax/2.6.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML
+    md_extensions: +raw_html +markdown_in_html_blocks +tex_math_dollars +fancy_lists +startnum +lists_without_preceding_blankline
+    theme: readable
+    toc: no
+    code_folding: hide
+---
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+library(printr)
+library(magrittr)
+# library(ggplot2)
+library(rbokeh)
+library(RMySQL)
+```
+This is a report on [Wikimedia Maps](https://www.mediawiki.org/wiki/Maps) usage across [Wikimedia Projects](https://wikimediafoundation.org/wiki/Our_projects).
+
+## Wikimedia Commons {.tabset}
+
+### Maps within Data namespace
+
+[Map data](https://www.mediawiki.org/wiki/Help:Map_Data) allows users to store GeoJSON data on wiki, similar to images. [Search for *.map within Data namespace](https://commons.wikimedia.org/w/index.php?search=.map&title=Special:Search&profile=advanced&fulltext=1&ns486=1) and you get results like [Data:Parramatta Light Rail.map](https://commons.wikimedia.org/wiki/Data:Parramatta_Light_Rail.map):
+
+!["Data:Parramatta Light Rail.map", available under Creative Commons Zero.](figures/data_map.png)
+
+Let's see how many of those there are:
+
+```{r commons_connect, echo=FALSE}
+con <- dbConnect(MySQL(), host = "127.0.0.1", group = "client", dbname = "commonswiki", port = 3307)
+```
+
+```{sql commons_query, connection=con, cache=TRUE}
+SELECT
+  CASE WHEN page_title RLIKE '\.map$' THEN 'map'
+       WHEN page_title RLIKE '\.tab$' THEN 'tabular'
+       ELSE 'other'
+  END AS data,
+  COUNT(*) AS total
+FROM page
+WHERE page_namespace = 486
+GROUP BY data;
+```
+
+### Geo Tags
+
+In June 2016 we released Maps on Commons ([T138029](https://phabricator.wikimedia.org/T138029)). Users could add coordinates to files to geo-tag them. For example:
+
+```{sql geo_tagged_pages, connection=con, cache=TRUE}
+SELECT page_title AS file, gt_lat AS latitude, gt_lon AS longitude
+FROM (
+  SELECT gt_page_id, gt_lat, gt_lon
+  FROM geo_tags
+  WHERE gt_primary = 1 AND NOT (gt_lat = 0 AND gt_lon = 0)
+  LIMIT 10
+) geo_tagged
+LEFT JOIN page
+  ON geo_tagged.gt_page_id = page.page_id AND page.page_namespace = 6;
+```
+
+One way to consider usage is how many pages are geo-tagged vs not:
+
+```{sql geo_tags, connection=con, output.var="geo_tags", cache=TRUE, cache=TRUE}
+SELECT COUNT(*) AS total
+FROM geo_tags
+WHERE gt_primary = 1
+```
+```{sql commons_files, connection=con, output.var="commons_files", cache=TRUE}
+SELECT COUNT(*) AS total
+FROM page
+WHERE page_namespace = 6 AND page_is_redirect = 0
+```
+```{r geo_tagged, echo=FALSE, cache=TRUE}
+dplyr::data_frame(
+  `geo-tagged pages*` = prettyNum(geo_tags$total[1], big.mark = ",", scientific = FALSE),
+  `total files on Commons` = prettyNum(commons_files$total[1], big.mark = ",", scientific = FALSE),
+  `proportion geo-tagged` = scales::percent_format()(geo_tags$total[1]/commons_files$total[1])
+)
+```
+
+__\*__ this is actually overcounting because there is a known issue ([T143366](https://phabricator.wikimedia.org/T143366)) where the **geo_tags** table (List of pages' geographical coordinates) is updated when coordinates are added to a page, but not updated when the coordinates are removed. It looks like the code that deals with **geo_tags** is part of the [GeoData extension](https://phabricator.wikimedia.org/diffusion/EGDA/) and [Wikidata extension](https://phabricator.wikimedia.org/diffusion/EWDA/) repositories (e.g. [GeoDataDataUpdater.php](https://phabricator.wikimedia.org/diffusion/EWDA/browse/master/extensions/Wikibase/repo/includes/ParserOutput/GeoDataDataUpdater.php)).
+
+### Maplinks and Mapframes
+
+[Mapframes](https://www.mediawiki.org/wiki/Help:Extension:Kartographer#.3Cmapframe.3E_usage) and [maplinks](https://www.mediawiki.org/wiki/Help:Extension:Kartographer#.3Cmaplink.3E) are two ways that Wikimedia Maps can be included on a page when the [Kartographer extension](https://www.mediawiki.org/wiki/Extension:Kartographer) is enabled.
+
+```{sql commons_map_prevalence, connection=con, cache=TRUE}
+SELECT
+  COUNT(*) AS `total files`,
+  SUM(IF(mapframes > 0, 1, 0)) AS `files with a mapframe`,
+  SUM(IF(maplinks > 0, 1, 0)) AS `files with a maplink`,
+  SUM(mapframes) AS `total mapframes`,
+  SUM(maplinks) AS `total maplinks`,
+  SUM(IF(mapframes > 0, 1, 0))/COUNT(*) AS `mapframe prevalence`,
+  SUM(IF(maplinks > 0, 1, 0))/COUNT(*) AS `maplink prevalence`
+FROM (
+  SELECT
+    page_id,
+    SUM(IF(type = 'mapframe', instances, 0)) AS mapframes,
+    SUM(IF(type = 'maplink', instances, 0)) AS maplinks
+  FROM (
+    SELECT page.page_id,
+      CASE kartographer.pp_propname
+           WHEN 'kartographer_frames' THEN 'mapframe'
+           WHEN 'kartographer_links' THEN 'maplink'
+      END AS type,
+      kartographer.pp_value AS instances
+    FROM (
+      SELECT * FROM page_props
+      WHERE pp_propname IN('kartographer_frames', 'kartographer_links') AND pp_value > 0
+    ) AS kartographer
+    RIGHT JOIN page ON page.page_id = kartographer.pp_page AND page.page_namespace = 6
+  ) AS joined_tables
+  GROUP BY page_id
+) counts;
+```
+
+Approximately 17% (9.48M) of 55.75M files on Commons include a maplink.
+
+```{r commons_disconnect, echo=FALSE}
+invisible(dbDisconnect(con))
+```
+
+## All Maps-enabled Wikimedia Projects
+
+### Maps Inclusion
+
+According to [this](https://www.mediawiki.org/wiki/Maps#Wikimedia_projects_that_have_Maps_enabled), the following wikis have Maps enabled:
+
+- [Metawiki](https://meta.wikimedia.org/)
+- [MediaWiki](https://www.mediawiki.org/)
+- [Wikivoyage](https://www.wikivoyage.org/) (all languages)
+    - e.g. [How to use dynamic maps on the English Wikivoyage](https://en.wikivoyage.org/wiki/Wikivoyage:How_to_use_dynamic_maps)
+- [Wikipedia](https://www.wikipedia.org/)
+    - [Catalan](https://ca.wikipedia.org/)
+    - [Hebrew](https://he.wikipedia.org/)
+    - [Russian](https://ru.wikipedia.org/)
+    - [Macedonian](https://mk.wikipedia.org/)
+    - [French](https://fr.wikipedia.org/)
+    - [Finnish](https://fi.wikipedia.org)
+    - [Norwegian](https://no.wikipedia.org/)
+    - [Swedish](https://sv.wikipedia.org/)
+
+Let's count how many articles on those wikis have mapframes and/or maplinks...
+    
+```{r all_wikis_data, cache=TRUE}
+dbs <- readr::read_lines("db.txt")
+wikivoyages <- grep("voyage$", dbs, value = TRUE)
+wikipedias <- c("cawiki", "hewiki", "ruwiki", "mkwiki", "frwiki", "fiwiki", "nowiki", "svwiki")
+other_projects <- c("metawiki", "mediawikiwiki")
+query <- "SELECT
+  COUNT(*) AS `total articles`,
+  SUM(IF(mapframes > 0, 1, 0)) AS `articles with a mapframe`,
+  SUM(IF(maplinks > 0, 1, 0)) AS `articles with a maplink`,
+  SUM(mapframes) AS `total mapframes`,
+  SUM(maplinks) AS `total maplinks`,
+  SUM(IF(mapframes > 0, 1, 0))/COUNT(*) AS `mapframe prevalence`,
+  SUM(IF(maplinks > 0, 1, 0))/COUNT(*) AS `maplink prevalence`
+FROM (
+  SELECT
+    page_id,
+    SUM(IF(type = 'mapframe', instances, 0)) AS mapframes,
+    SUM(IF(type = 'maplink', instances, 0)) AS maplinks
+  FROM (
+    SELECT page.page_id,
+      CASE kartographer.pp_propname
+           WHEN 'kartographer_frames' THEN 'mapframe'
+           WHEN 'kartographer_links' THEN 'maplink'
+      END AS type,
+      kartographer.pp_value AS instances
+    FROM (
+      SELECT * FROM page_props
+      WHERE pp_propname IN('kartographer_frames', 'kartographer_links') AND pp_value > 0
+    ) AS kartographer
+    RIGHT JOIN page ON page.page_id = kartographer.pp_page AND page.page_namespace = 0
+  ) AS joined_tables
+  GROUP BY page_id
+) counts;"
+results <- lapply(c(wikivoyages, wikipedias, other_projects), function(db) {
+  message("Fetching mapframe & maplink statistics from ", db, "...")
+  con <- dbConnect(MySQL(), host = "127.0.0.1", group = "client", dbname = db, port = 3307)
+  suppressWarnings(result <- wmf::mysql_read(query, db, con = con))
+  invisible(dbDisconnect(con))
+  return(result)
+})
+results <- dplyr::bind_rows(results)
+rownames(results) <- c(wikivoyages, wikipedias, other_projects)
+```
+
+Below are the results as of 11 July 2017:
+
+```{r all_wikis_table}
+DT::datatable(
+  results,
+  caption = "This shows the prevalence of mapframes and maplinks on wikis that have Maps enabled.",
+  filter = "top",
+  options = list(
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:")
+  )
+) %>%
+  DT::formatPercentage(c("mapframe prevalence", "maplink prevalence"), 3)
+```
+
+<br>
+
+Namely, French Wikivoyage has the lead, with nearly 30% articles having a mapframe or a maplink. Nearly 7% of Russian Wikipedia articles include maplinks, although there is no practical way to filter out pages for which including a maplink would not make sense. Of the Wikipedias, Catalan has the lead for mapframe inclusion with almost 11% of articles featuring a mapframe.
+
+```{r all_wikis_plot}
+results$wiki <- rownames(results)
+figure(width = 900, height = 500) %>%
+  ly_points(100 * `maplink prevalence`, 100 * `mapframe prevalence`, data = results,
+    hover = list(wiki, `total articles`, `articles with a maplink`, `maplink prevalence`, `articles with a mapframe`, `mapframe prevalence`)) %>%
+  y_axis("Mapframe Prevalence", number_formatter = "printf", format = "%0.1f%%") %>%
+  x_axis("Maplink Prevalence", number_formatter = "printf", format = "%0.1f%%")
+```
+
+# Appendix
+
+## Setup
+
+This report was compiled using [RMarkdown](http://rmarkdown.rstudio.com/), [knitr](https://yihui.name/knitr/), and an open SSH tunnel for connecting to our databases:
+
+```
+ssh -N stat3 -L 3307:analytics-store.eqiad.wmnet:3306
+```
+
+## Notes
+
+When figuring stuff out (e.g. what it looks like in the database when a page has a map) and working with page IDs, the [MediaWiki API](https://www.mediawiki.org/wiki/API:Main_page) can be used to get a page title from a page ID:
+
+```
+https://commons.wikimedia.org/w/api.php?action=query&prop=revisions&rvprop=content&format=jsonfm&pageids=ID1|ID2
+```

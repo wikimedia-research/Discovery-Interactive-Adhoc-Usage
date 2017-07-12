@@ -1,0 +1,41 @@
+---
+title: "Maps Analytics: Interactions"
+author: "MPopov (WMF)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    mathjax: https://tools-static.wmflabs.org/cdnjs/ajax/libs/mathjax/2.6.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML
+    md_extensions: +raw_html +markdown_in_html_blocks +tex_math_dollars +fancy_lists +startnum +lists_without_preceding_blankline
+    self_contained: yes
+    theme: flatly
+---
+```{r setup}
+library(printr)
+library(magrittr)
+library(ggplot2)
+```
+
+We're going to be taking a look at interaction with Maps via [Schema:Kartographer](https://meta.wikimedia.org/wiki/Schema:Kartographer) (see [T163139](https://phabricator.wikimedia.org/T163139) for more details). First, we open up an SSH tunnel (separately):
+
+```bash
+ssh -N stat3 -L 3307:analytics-store.eqiad.wmnet:3306
+```
+
+```{r connect, eval=FALSE}
+# https://people.wikimedia.org/~bearloga/notes/rnotebook-eventlogging.html
+library(RMySQL)
+con <- dbConnect(MySQL(), host = "127.0.0.1", group = "client", dbname = "log", port = 3307)
+knitr::opts_chunk$set(connection = con)
+```
+
+```{sql, connection=con, output.var="events", eval=FALSE}
+SELECT
+  timestamp AS ts, wiki
+FROM Kartographer_16132745
+WHERE
+  LEFT(timestamp, 8) >= '20170707'
+```
+
+```{r disconnect, eval=FALSE}
+dbDisconnect(con)
+```

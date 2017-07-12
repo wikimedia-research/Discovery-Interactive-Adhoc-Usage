@@ -1,0 +1,29 @@
+# History files
+.Rhistory
+.Rapp.history
+
+# Example code in package build process
+*-Ex.R
+
+# RStudio files
+.Rproj.user/
+
+# produced vignettes
+vignettes/*.html
+vignettes/*.pdf
+
+# Data files
+*/data/*
+*.gz
+
+*.rds
+
+*.csv
+.Rproj.user
+
+Analyses/Pageviews Rise/figures/top10.pdf
+
+*.tsv
+
+*.RData
+*_cache
