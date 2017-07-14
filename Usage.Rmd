@@ -36,7 +36,7 @@ According to [this](https://www.mediawiki.org/wiki/Maps#Wikimedia_projects_that_
 - [Metawiki](https://meta.wikimedia.org/)
 - [MediaWiki](https://www.mediawiki.org/)
 - [Wikivoyage](https://www.wikivoyage.org/) (all languages)
-- [Wikipedia](https://www.wikipedia.org/)
+- Wikipedia:
     - [Catalan](https://ca.wikipedia.org/)
     - [Hebrew](https://he.wikipedia.org/)
     - [Russian](https://ru.wikipedia.org/)
@@ -46,7 +46,7 @@ According to [this](https://www.mediawiki.org/wiki/Maps#Wikimedia_projects_that_
     - [Norwegian](https://no.wikipedia.org/)
     - [Swedish](https://sv.wikipedia.org/)
 
-Let's count how many articles on those wikis have mapframes...
+Let's count how many articles on those wikis have mapframes. Some articles have more than one mapframe, so we also counted the total number of mapframes.
 
 ```{r mapframes_data, cache=TRUE}
 # dbs is a list of databases in analytics-store
@@ -56,7 +56,7 @@ other_projects <- c("metawiki", "mediawikiwiki")
 query <- "SELECT
   COUNT(*) AS `total articles`,
   SUM(IF(mapframes > 0, 1, 0)) AS `articles with a mapframe`,
-  SUM(mapframes) AS `total mapframes`,
+  SUM(COALESCE(mapframes, 0)) AS `total mapframes`,
   SUM(IF(mapframes > 0, 1, 0))/COUNT(*) AS `mapframe prevalence`
 FROM (
   SELECT
@@ -80,7 +80,7 @@ mapframes <- dplyr::bind_rows(mapframes)
 rownames(mapframes) <- language_projects[c(wikivoyages, wikipedias, other_projects)]
 ```
 
-Below are the results as of 13 July 2017:
+Below are the results as of 14 July 2017:
 
 ```{r mapframes_table}
 DT::datatable(
@@ -88,7 +88,8 @@ DT::datatable(
   caption = "This shows the prevalence of mapframes on wikis that have it enabled.",
   filter = "top",
   options = list(
-    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:")
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
+    order = list(list(4, "desc"))
   )
 ) %>%
   DT::formatPercentage("mapframe prevalence", 3)
@@ -100,6 +101,8 @@ The average prevalence across wikis is `r sprintf("%.2f%%", 100 * mean(mapframes
 
 ### Maplink Inclusion
 
+Let's count how many articles across Wikipedia, Wikivyoage, Meta, and MediaWiki have maplinks Some articles have more than one maplink, so we also counted the total number of maplinks.
+
 ```{r maplinks_data, cache=TRUE}
 # dbs is a list of databases in analytics-store
 wikis <- grep("wiki$", dbs, value = TRUE)
@@ -109,7 +112,7 @@ wikis <- wikis[wikis %in% names(language_projects)]
 query <- "SELECT
   COUNT(*) AS `total articles`,
   SUM(IF(maplinks > 0, 1, 0)) AS `articles with a maplink`,
-  SUM(maplinks) AS `total maplinks`,
+  SUM(COALESCE(maplinks, 0)) AS `total maplinks`,
   SUM(IF(maplinks > 0, 1, 0))/COUNT(*) AS `maplink prevalence`
 FROM (
   SELECT
@@ -132,13 +135,17 @@ maplinks <- lapply(wikis, function(db) {
 maplinks <- dplyr::bind_rows(maplinks)
 rownames(maplinks) <- language_projects[wikis]
 ```
+
+Below are the results as of 14 July 2017:
+
 ```{r maplinks_table}
 DT::datatable(
   maplinks,
   caption = "This shows the prevalence of maplinks on wikis.",
   filter = "top",
   options = list(
-    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:")
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
+    order = list(list(4, "desc"))
   )
 ) %>%
   DT::formatPercentage("maplink prevalence", 3)
@@ -178,7 +185,7 @@ WHERE page_namespace = 486
 GROUP BY data;
 ```
 
-### Geo Tags
+### Geo-tags
 
 In June 2016 we released Maps on Commons ([T138029](https://phabricator.wikimedia.org/T138029)). Users could add coordinates to files to geo-tag them. For example:
 
@@ -194,13 +201,13 @@ LEFT JOIN page
   ON geo_tagged.gt_page_id = page.page_id AND page.page_namespace = 6;
 ```
 
-One way to consider usage is how many pages are geo-tagged vs not (query run on 13 July 2017):
+One way to consider usage is how many pages are geo-tagged vs not (query run on 14 July 2017):
 
 ```{sql geo_tags, connection=con, cache=TRUE}
 SELECT
   COUNT(*) AS `total files`,
   SUM(is_geotagged) AS `geo-tagged files`,
-  SUM(is_geotagged)/COUNT(*) AS `proportion geo-tagged`
+  CONCAT(ROUND(100*SUM(is_geotagged)/COUNT(*),2),'%') AS `proportion geo-tagged`
 FROM (
   SELECT
     page.page_id AS page_id,
@@ -223,9 +230,11 @@ __\*__ this is actually overcounting because there is a known issue ([T143366](h
 
 ### Maplinks and Mapframes
 
-[Mapframes](https://www.mediawiki.org/wiki/Help:Extension:Kartographer#.3Cmapframe.3E_usage) and [maplinks](https://www.mediawiki.org/wiki/Help:Extension:Kartographer#.3Cmaplink.3E) are two ways that Wikimedia Maps can be included on a page when the [Kartographer extension](https://www.mediawiki.org/wiki/Extension:Kartographer) is enabled.
+[Mapframes](https://www.mediawiki.org/wiki/Help:Extension:Kartographer#.3Cmapframe.3E_usage) and [maplinks](https://www.mediawiki.org/wiki/Help:Extension:Kartographer#.3Cmaplink.3E) are two ways that Wikimedia Maps can be included on a page when the [Kartographer extension](https://www.mediawiki.org/wiki/Extension:Kartographer) is enabled. Maplinks are also added to a page automatically through [coordinates](https://commons.wikimedia.org/wiki/Module:Coordinates), [Object Location](https://commons.wikimedia.org/wiki/Template:Object_location), and [Location](https://commons.wikimedia.org/wiki/Template:Location) templates as part of [geocoding on Commons](https://commons.wikimedia.org/wiki/Commons:Geocoding). For example, as of 14 July 2017, [File:RNV HEAG-Dampf Schleifenbogen 1.JPG](https://commons.wikimedia.org/wiki/File:RNV_HEAG-Dampf_Schleifenbogen_1.JPG) includes a mapframe in the description, and [File:Paddestoel 003.jpg](https://commons.wikimedia.org/wiki/File:Paddestoel_003.jpg) includes camera location which results in a maplink.
 
-(Query run on 13 July 2017.)
+![**Left**: an example of a photo (by [User:Nenntmichruhigip](https://commons.wikimedia.org/wiki/User:Nenntmichruhigip), available under [Free Art License](https://en.wikipedia.org/wiki/en:Free_Art_License)) having a mapframe. **Right**: an example of a photo (by [Andre Engels](https://commons.wikimedia.org/wiki/User:Andre_Engels), available under Creative Commons [Attribution 1.0 Generic](https://creativecommons.org/licenses/by/1.0/deed.en) license) with a camera location attached, resulting in a maplink.](figures/commons.png)
+
+(Query run on 14 July 2017.)
 
 ```{sql commons_map_prevalence, connection=con, cache=TRUE}
 SELECT
@@ -234,8 +243,8 @@ SELECT
   SUM(IF(maplinks > 0, 1, 0)) AS `files with a maplink`,
   SUM(mapframes) AS `total mapframes`,
   SUM(maplinks) AS `total maplinks`,
-  SUM(IF(mapframes > 0, 1, 0))/COUNT(*) AS `mapframe prevalence`,
-  SUM(IF(maplinks > 0, 1, 0))/COUNT(*) AS `maplink prevalence`
+  CONCAT(ROUND(100*SUM(IF(mapframes > 0, 1, 0))/COUNT(*),2),'%') AS `mapframe prevalence`,
+  CONCAT(ROUND(100*SUM(IF(maplinks > 0, 1, 0))/COUNT(*),2),'%') AS `maplink prevalence`
 FROM (
   SELECT
     page_id,
@@ -258,7 +267,7 @@ FROM (
 ) counts;
 ```
 
-Approximately 17% (9.48M) of 55.75M files on Commons include a maplink.
+Approximately 17% (9.5M) of 55.9M files on Commons include a maplink.
 
 ```{r commons_disconnect, echo=FALSE}
 invisible(dbDisconnect(con))
