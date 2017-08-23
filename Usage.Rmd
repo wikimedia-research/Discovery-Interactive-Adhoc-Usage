@@ -1,7 +1,7 @@
 ---
 title: "Wikimedia Maps usage on Wikimedia projects"
 author: "MPopov (WMF)"
-date: "`r Sys.Date()`"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
   html_document:
     mathjax: https://tools-static.wmflabs.org/cdnjs/ajax/libs/mathjax/2.6.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML
@@ -14,8 +14,6 @@ output:
 knitr::opts_chunk$set(message = FALSE, warning = FALSE)
 library(printr)
 library(magrittr)
-# library(ggplot2)
-library(rbokeh)
 library(RMySQL)
 dbs <- readr::read_lines("db.txt")
 language_projects <- polloi::get_langproj()
@@ -25,7 +23,7 @@ language_projects <- paste0(
 ) %>%
   set_names(language_projects$wikiid)
 ```
-```{css}
+```{css fonts, echo=FALSE}
 @import url('https://fonts.googleapis.com/css?family=Source+Code+Pro|Source+Sans+Pro|Source+Serif+Pro');
 body, p {
   font-family: 'Source Serif Pro', serif;
@@ -351,7 +349,7 @@ FROM (
 ) counts;
 ```
 
-Approximately 17% (9.5M) of 56M files on Commons include a maplink.
+Approximately 17% (~9.7M) of 56.68M files on Commons include a maplink.
 
 ```{r commons_disconnect, echo=FALSE}
 invisible(dbDisconnect(con))
