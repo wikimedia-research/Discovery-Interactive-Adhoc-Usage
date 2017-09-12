@@ -1,16 +1,16 @@
 ---
 params:
-  days: 90
+  days: 120
 title: "Interactions with Wikimedia Maps on Wikimedia projects"
 author: "MPopov (WMF)"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
   html_document:
+    code_folding: hide
     mathjax: https://tools-static.wmflabs.org/cdnjs/ajax/libs/mathjax/2.6.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML
     md_extensions: +raw_html +markdown_in_html_blocks +tex_math_dollars +fancy_lists +startnum +lists_without_preceding_blankline -autolink_bare_uris
     theme: readable
     toc: yes
-    code_folding: hide
 ---
 ```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
 knitr::opts_chunk$set(message = FALSE, warning = FALSE)
@@ -67,6 +67,11 @@ WHERE
 ```
 ```{r fetch, eval=TRUE, cache=TRUE}
 results <- wmf::mysql_read(query, "log", con)
+```
+```{r disconnect, eval=TRUE, include=FALSE}
+dbDisconnect(con)
+```
+```{r process, eval=TRUE, cache=TRUE}
 results$first_interaction <- results$first_interaction == 1
 results$fullscreen <- results$fullscreen == 1
 results$mobile <- results$mobile == 1
@@ -82,9 +87,11 @@ results <- cbind(
 results$layer %<>% forcats::fct_recode(
   "Relief map" = "Reliefkarte",
   "Hill shading" = "Schummerung",
-  "Traffic line network" = "Verkehrsliniennetz",
+  "Traffic line\nnetwork" = "Verkehrsliniennetz",
   "Hiking" = "Wanderwege",
-  "Boundaries" = "Grenzen"
+  "Boundaries" = "Grenzen",
+  "Cycling" = "Radwege",
+  "Traffic line\nnetwork" = "Traffic line network"
 )
 results$service %<>% forcats::fct_recode(
   "Google Maps" = "google-maps",
@@ -105,10 +112,8 @@ results$service %<>% forcats::fct_recode(
   "SkyVector" = "skyvector"
 )
 results$type <- polloi::capitalize_first_letter(results$type)
+results$type[results$type == "NANA"] <- NA
 results <- results[order(results$wiki, results$user_token, results$ts), ]
-```
-```{r disconnect, eval=TRUE, include=FALSE}
-dbDisconnect(con)
 ```
 ```{r data.table}
 lang_proj <- polloi::get_langproj() # polloi::update_prefixes()
@@ -121,40 +126,68 @@ events <- data.table::data.table(results, key = c("wiki", "user_token"))
 rm(results, lang_proj) # cleanup
 ```
 ```{r summary}
-DT::datatable(
-  events[, list(events = .N), by = c("language", "project", "date", "mobile", "user_token")][, list(
+seshs <- events[, list(events = .N),
+                by = c("feature", "language", "project", "date", "mobile", "user_token")] %>%
+  .[, list(
     sessions = .N,
     events = sum(events),
     mobile_prop = mean(mobile)
-  ), by = c("language", "project", "date")][, list(
-    `sessions/day` = median(sessions),
-    `events/day` = median(events),
-    `% of sessions on mobile` = median(mobile_prop)
-  ), by = c("language", "project")],
-  caption = paste("This shows median counts of sessions and events across from the past", params$days, "days."),
+  ), by = c("feature", "language", "project", "date")] %>%
+  .[, list(
+    total = sum(sessions),
+    `sessions/day` = as.double(median(sessions)),
+    `% of sessions on mobile` = median(mobile_prop),
+    `% of sessions on desktop` = 1 - median(mobile_prop)
+  ), by = c("feature", "language", "project")] %>%
+  dplyr::group_by(feature) %>%
+  dplyr::mutate(`% of total sessions` = total / sum(total)) %>%
+  dplyr::select(c(`language`, `project`, `% of total sessions`, `sessions/day`, `% of sessions on mobile`, `% of sessions on desktop`))
+DT::datatable(
+  seshs,
+  caption = paste("Per-feature summaries from the past", params$days, "days."),
   filter = "top",
   extensions = "Buttons",
   options = list(
     pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
-    order = list(list(3, "desc")), dom = "Bfrtip", buttons = c("copy", "csv")
+    order = list(list(4, "desc")), dom = "Bfrtip", buttons = c("copy", "csv")
   )
 ) %>%
-  DT::formatPercentage("% of sessions on mobile", 1) %>%
+  DT::formatPercentage(c("% of sessions on mobile", "% of sessions on desktop", "% of total sessions"), 1) %>%
   DT::formatCurrency(
-    columns = c("sessions/day", "events/day"),
+    columns = c("sessions/day"),
     currency = "", digits = 0
   )
 ```
 
 ## Interactions
 
+```{r activations}
+events[feature == "mapframe", list(activated = any(event == "activate")), by = c("date", "user_token")] %>%
+  .[, list(activated = 100 * sum(activated) / .N), by = c("date")] %>%
+  { xts::xts(.[, -1], order.by = .$date) } %>%
+  dygraphs::dygraph(
+    xlab = "Date", ylab = "% of sessions",
+    main = "Proportion of sessions that have activated a mapframe",
+    width = 900
+  ) %>%
+  dygraphs::dyOptions(drawPoints = TRUE, pointSize = 2) %>%
+  dygraphs::dyAxis("x", axisLabelFormatter = polloi::custom_axis_formatter) %>%
+  dygraphs::dyAxis(
+    "y",
+    axisLabelFormatter = "function(x) { return (Math.round(x*100)/100) + '%'; }",
+    valueFormatter = "function(x) { return (Math.round(x*100)/100) + '%'; }"
+  )
+```
+
 ### External services sidebar
 
 ![Screenshot showing the external services sidebar.](figures/external_services.png)
 
+Each point in the graph below is a rolling average of 7 days to better show trends, but if you would like to see the raw daily data you can adjust the number in the bottom left corner.
+
 ```{r sidebar_show}
 events[!project %in% c("MediaWiki", "Wikimedia Chapter", "Wikimedia Foundation wiki", "Wikinews", "Wiktionary", "Meta wiki", "Wikidata"),
-       list(interacted = any(event %in% c("sidebar-show", "sidebar-hide", "sidebar-type", "sidebar-click"))),
+       list(interacted = any(event %in% c("sidebar-hide", "sidebar-type", "sidebar-click"))),
        by = c("project", "wiki", "user_token", "date")] %>%
   .[, list(`% interacted` = 100 * sum(interacted) / .N), by = c("date", "project")] %>%
   tidyr::spread(project, `% interacted`, fill = 0) %>%
@@ -169,21 +202,21 @@ events[!project %in% c("MediaWiki", "Wikimedia Chapter", "Wikimedia Foundation w
   dygraphs::dyAxis("x", axisLabelFormatter = polloi::custom_axis_formatter) %>%
   dygraphs::dyAxis(
     "y",
-    axisLabelFormatter = "function(x) { return x + '%'; }",
+    axisLabelFormatter = "function(x) { return (Math.round(x*100)/100) + '%'; }",
     valueFormatter = "function(x) { return (Math.round(x*100)/100) + '%'; }"
-  )
+  ) %>%
+  dygraphs::dyRoller(rollPeriod = 7)
 ```
 <div id="sidebar-legend" style="margin-top: 25px;"></div>
-```{r sidebar_switch}
 
-```
 ```{r external_services}
 DT::datatable(
   events[!is.na(type) & !is.na(service),
-         list(events = .N),
-         by = c("type", "service")] %>%
-    tidyr::spread(type, events, fill = 0),
-  caption = paste("This table shows the total number of clicks on external services from the last", params$days, "days."),
+         list(sessions = data.table::uniqueN(.SD$user_token)),
+         by = c("date", "type", "service")] %>%
+    .[, list(`sessions/day` = ceiling(median(sessions))), by = c("type", "service")] %>%
+    tidyr::spread(type, `sessions/day`, fill = 0),
+  caption = paste("This table shows the median number of sessions per day that have clicked on external services (from the last", params$days, "days)."),
   filter = "top",
   extensions = "Buttons",
   options = list(
@@ -201,7 +234,7 @@ DT::datatable(
 
 ![Map of Amsterdam from English Wikivoyage with Mapnik as the base, external layer.](figures/external_layers.png)
 
-```{r external_layers, cache=TRUE}
+```{r external_layers, cache=TRUE, fig.width=8}
 n_sessions <- data.table::uniqueN(events[date >= "2017-08-04", c("wiki", "user_token")])
 external_layers <- events[
   grepl("exlayer$", event) &
@@ -225,9 +258,10 @@ ggplot(external_layers, aes(x = layer, y = sessions, fill = event)) +
   labs(
     x = "Layer", y = "Proportion of total sessions",
     title = "Usage of external layers",
-    subtitle = "Using data from 4 August 2017 through 21 August 2017"
+    subtitle = glue::glue("Using data from {min(events$date)} through {max(events$date)}"),
+    caption = "Does not include/show users who have set external layers as defaults."
   ) +
-  wmf::theme_min(base_family = "Open Sans")
+  wmf::theme_min(base_family = "Source Sans Pro")
 ```
 
 ### Page Discovery
@@ -242,20 +276,30 @@ There are three possible links the user can click on on a Map:
 
 ```{r discovery}
 # discovery: user goes to another page thanks to this feature
+totals <- events[, list(sessions = data.table::uniqueN(user_token)), by = c("language", "project", "feature")]
+disco <- events[
+  event == "discovery",
+  list(sessions = data.table::uniqueN(user_token)),
+  by = c("language", "project", "destination", "feature")
+] %>%
+  dplyr::left_join(totals, by = c("language", "project", "feature")) %>%
+  dplyr::mutate(prop = sessions.x / sessions.y) %>%
+  dplyr::select(c(feature, language, project, destination, prop)) %>%
+  tidyr::spread(destination, prop, fill = 0)
 DT::datatable(
-  events[event == "discovery",
-         list(events = .N),
-         by = c("language", "project", "destination", "feature")] %>%
-    tidyr::spread(destination, events, fill = 0),
-  caption = paste("This table shows the total number of clicks to other pages from a maplink/mapframe across the last", params$days, "days."),
+  disco,
+  caption = paste("This table shows the % of sessions that clicked on links to other pages from a map (via maplink/mapframe) across the last", params$days, "days."),
   filter = "top",
   extensions = "Buttons",
   options = list(
     pageLength = 20, autoWidth = TRUE, language = list(search = "Filter:"),
-    order = list(list(3, "desc")), dom = "Bfrtip", buttons = c("copy", "csv")
+    order = list(list(6, "desc")), dom = "Bfrtip", buttons = c("copy", "csv")
   )
-)
+) %>%
+  DT::formatPercentage(c("external", "internal", "interwiki"), 1)
 ```
+
+Maps on Commons (mapframes specifically) help users discover new content more than on other wikis.
 
 # Appendix
 
@@ -264,5 +308,5 @@ DT::datatable(
 This report was compiled using [RMarkdown](http://rmarkdown.rstudio.com/), [knitr](https://yihui.name/knitr/), and an open SSH tunnel for connecting to our databases:
 
 ```
-ssh -N stat3 -L 3307:analytics-store.eqiad.wmnet:3306
+ssh -N stat6 -L 3307:analytics-store.eqiad.wmnet:3306
 ```

@@ -45,6 +45,7 @@ According to [the MediaWiki Maps page](https://www.mediawiki.org/wiki/Maps#Wikim
 
 - [Metawiki](https://meta.wikimedia.org/)
 - [MediaWiki](https://www.mediawiki.org/)
+- [Wikimedia Ukraine](https://ua.wikimedia.org/)
 - [Wikivoyage](https://www.wikivoyage.org/) (all languages)
 - Wikipedia:
     - [Catalan](https://ca.wikipedia.org/)
@@ -55,14 +56,17 @@ According to [the MediaWiki Maps page](https://www.mediawiki.org/wiki/Maps#Wikim
     - [Finnish](https://fi.wikipedia.org)
     - [Norwegian](https://no.wikipedia.org/)
     - [Swedish](https://sv.wikipedia.org/)
+    - [Portuguese](https://pt.wikipedia.org/)
+    - [Czech](https://cs.wikipedia.org/)
+    - [Basque](https://eu.wikipedia.org/)
 
 Let's count how many articles on those wikis have mapframes. Some articles have more than one mapframe, so we also counted the total number of mapframes.
 
 ```{r mapframes_data, cache=TRUE}
 # dbs is a list of databases in analytics-store
 wikivoyages <- grep("voyage$", dbs, value = TRUE)
-wikipedias <- c("cawiki", "hewiki", "ruwiki", "mkwiki", "frwiki", "fiwiki", "nowiki", "svwiki")
-other_projects <- c("metawiki", "mediawikiwiki")
+wikipedias <- c("cawiki", "hewiki", "ruwiki", "mkwiki", "frwiki", "fiwiki", "nowiki", "svwiki", "ptwiki", "cswiki", "euwiki")
+other_projects <- c("metawiki", "mediawikiwiki", "uawikimedia")
 query <- "SELECT
   COUNT(*) AS `total articles`,
   SUM(IF(mapframes > 0, 1, 0)) AS `articles with a mapframe`,
@@ -70,14 +74,18 @@ query <- "SELECT
   SUM(IF(mapframes > 0, 1, 0))/COUNT(*) AS `mapframe prevalence`
 FROM (
   SELECT
-    page.page_id,
+    p.page_id,
     pp_value AS mapframes
   FROM (
     SELECT pp_page, pp_value
     FROM page_props
     WHERE pp_propname = 'kartographer_frames' AND pp_value > 0
   ) AS filtered_props
-  RIGHT JOIN page ON page.page_id = filtered_props.pp_page AND page.page_namespace = 0
+  RIGHT JOIN (
+    SELECT page_id FROM page
+    WHERE page_namespace = 0 AND page_is_redirect = 0
+  ) p
+  ON p.page_id = filtered_props.pp_page
 ) joined_tables;"
 mapframes <- lapply(c(wikivoyages, wikipedias, other_projects), function(db) {
   message("Fetching mapframe statistics from ", db, "...")
@@ -90,7 +98,7 @@ mapframes <- dplyr::bind_rows(mapframes)
 rownames(mapframes) <- language_projects[c(wikivoyages, wikipedias, other_projects)]
 ```
 
-Below are the results as of 17 July 2017:
+Below are the results as of 11 September 2017:
 
 ```{r mapframes_table}
 DT::datatable(
@@ -133,14 +141,18 @@ query <- "SELECT
   SUM(IF(maplinks > 0, 1, 0))/COUNT(*) AS `maplink prevalence`
 FROM (
   SELECT
-    page.page_id,
+    p.page_id,
     pp_value AS maplinks
   FROM (
     SELECT pp_page, pp_value
     FROM page_props
     WHERE pp_propname = 'kartographer_links' AND pp_value > 0
   ) AS filtered_props
-  RIGHT JOIN page ON page.page_id = filtered_props.pp_page AND page.page_namespace = 0
+  RIGHT JOIN (
+    SELECT page_id FROM page
+    WHERE page_namespace = 0 AND page_is_redirect = 0
+  ) p
+  ON p.page_id = filtered_props.pp_page
 ) joined_tables;"
 maplinks <- lapply(wikis, function(db) {
   message("Fetching maplink statistics from ", db, "...")
@@ -153,7 +165,7 @@ maplinks <- dplyr::bind_rows(maplinks)
 rownames(maplinks) <- language_projects[wikis]
 ```
 
-Below are the results as of 17 July 2017:
+Below are the results as of 11 September 2017:
 
 ```{r maplinks_table}
 DT::datatable(
@@ -253,7 +265,7 @@ Let's see how many of those there are:
 con <- dbConnect(MySQL(), host = "127.0.0.1", group = "client", dbname = "commonswiki", port = 3307)
 ```
 
-(Query run on 17 July 2017.)
+(Query run on 11 September 2017.)
 
 ```{sql commons_query, connection=con, cache=TRUE}
 SELECT
@@ -276,14 +288,20 @@ SELECT page_title AS file, gt_lat AS latitude, gt_lon AS longitude
 FROM (
   SELECT gt_page_id, gt_lat, gt_lon
   FROM geo_tags
-  WHERE gt_primary = 1 AND NOT (gt_lat = 0 AND gt_lon = 0)
+  WHERE gt_primary = 1
+    AND NOT (gt_lat = 0 AND gt_lon = 0)
   LIMIT 10
 ) geo_tagged
-LEFT JOIN page
-  ON geo_tagged.gt_page_id = page.page_id AND page.page_namespace = 6;
+LEFT JOIN (
+  SELECT page_id, page_title
+  FROM page
+  WHERE page_namespace = 6
+    AND page_is_redirect = 0
+) p
+ON geo_tagged.gt_page_id = p.page_id;
 ```
 
-One way to consider usage is how many pages are geo-tagged vs not (query run on 17 July 2017):
+One way to consider usage is how many pages are geo-tagged vs not (query run on 11 September 2017):
 
 ```{sql geo_tags, connection=con, cache=TRUE}
 SELECT
@@ -292,7 +310,7 @@ SELECT
   CONCAT(ROUND(100*SUM(is_geotagged)/COUNT(*),2),'%') AS `proportion geo-tagged*`
 FROM (
   SELECT
-    page.page_id AS page_id,
+    p.page_id AS page_id,
     CASE WHEN filtered_geotags.geotagged = 'yes' THEN true
          WHEN filtered_geotags.geotagged IS NULL THEN false
     END AS is_geotagged
@@ -301,10 +319,13 @@ FROM (
     FROM geo_tags
     WHERE gt_primary = 1
   ) AS filtered_geotags
-  RIGHT JOIN page
-    ON page.page_id = filtered_geotags.gt_page_id
-    AND page.page_namespace = 6
-    AND page.page_is_redirect = 0
+  RIGHT JOIN (
+    SELECT page_id
+    FROM page
+    WHERE page_namespace = 6
+      AND page_is_redirect = 0
+  ) p
+  ON filtered_geotags.gt_page_id = p.page_id
 ) joined_tables
 ```
 
@@ -316,7 +337,7 @@ __\*__ This is actually overcounting because there is a known issue ([T143366](h
 
 ![**Left**: an example of a photo (by [User:Nenntmichruhigip](https://commons.wikimedia.org/wiki/User:Nenntmichruhigip), available under [Free Art License](https://en.wikipedia.org/wiki/en:Free_Art_License)) having a mapframe. **Right**: an example of a photo (by [Andre Engels](https://commons.wikimedia.org/wiki/User:Andre_Engels), available under Creative Commons [Attribution 1.0 Generic](https://creativecommons.org/licenses/by/1.0/deed.en) license) with a camera location attached, resulting in a maplink.](figures/commons.png)
 
-(Query run on 17 July 2017.)
+(Query run on 11 September 2017.)
 
 ```{sql commons_map_prevalence, connection=con, cache=TRUE}
 SELECT
@@ -333,23 +354,31 @@ FROM (
     SUM(IF(type = 'mapframe', instances, 0)) AS mapframes,
     SUM(IF(type = 'maplink', instances, 0)) AS maplinks
   FROM (
-    SELECT page.page_id,
+    SELECT p.page_id,
       CASE kartographer.pp_propname
            WHEN 'kartographer_frames' THEN 'mapframe'
            WHEN 'kartographer_links' THEN 'maplink'
       END AS type,
       kartographer.pp_value AS instances
     FROM (
-      SELECT * FROM page_props
-      WHERE pp_propname IN('kartographer_frames', 'kartographer_links') AND pp_value > 0
+      SELECT *
+      FROM page_props
+      WHERE pp_propname IN('kartographer_frames', 'kartographer_links')
+        AND pp_value > 0
     ) AS kartographer
-    RIGHT JOIN page ON page.page_id = kartographer.pp_page AND page.page_namespace = 6
+    RIGHT JOIN (
+      SELECT page_id
+      FROM page
+      WHERE page_namespace = 6
+        AND page_is_redirect = 0
+    ) p
+    ON p.page_id = kartographer.pp_page
   ) AS joined_tables
   GROUP BY page_id
 ) counts;
 ```
 
-Approximately 17% (~9.7M) of 56.68M files on Commons include a maplink.
+Approximately 17% (~9.8M) of 57.1M files on Commons include a maplink.
 
 ```{r commons_disconnect, echo=FALSE}
 invisible(dbDisconnect(con))
@@ -362,7 +391,7 @@ invisible(dbDisconnect(con))
 This report was compiled using [RMarkdown](http://rmarkdown.rstudio.com/), [knitr](https://yihui.name/knitr/), and an open SSH tunnel for connecting to our databases:
 
 ```
-ssh -N stat3 -L 3307:analytics-store.eqiad.wmnet:3306
+ssh -N stat6 -L 3307:analytics-store.eqiad.wmnet:3306
 ```
 
 ## Notes
