@@ -40,8 +40,9 @@ Use the following commands:
 
 - `make clean` clears the caches from the previous run
 - `make usage` renders the usage report
+  - getting the latest prevalence stats directly from the databases takes some time
 - `make interactions` renders the interactions report
   - by default will fetch 90 days of Kartographer EventLogging data
   - use `make days=120 interactions` to have the report fetch 120, for example
 
-`Usage.Rmd` has a YAML header which contains the list of Wikipedias and other Wikimedia projects that have mapframes enabled, and that's what the report refers to when querying the databases.
+`Usage.Rmd` has a YAML header which contains the list of database names of Wikipedias and other Wikimedia projects that have mapframes enabled, and that's what the report refers to when querying. **Note** that Wikivoyages are included implicitly and do _not_ need to be explicitly specified.
