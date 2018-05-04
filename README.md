@@ -45,4 +45,4 @@ Use the following commands:
   - by default will fetch 90 days of Kartographer EventLogging data
   - use `make days=120 interactions` to have the report fetch 120, for example
 
-`Usage.Rmd` has a YAML header which contains the list of database names of Wikipedias and other Wikimedia projects that have mapframes enabled, and that's what the report refers to when querying. **Note** that Wikivoyages are included implicitly and do _not_ need to be explicitly specified.
+`Usage.Rmd` has a YAML header which contains the list of database names of Wikipedias and other Wikimedia projects that have mapframes enabled, and that's what the report refers to when querying. **Note** that Wikivoyages are included implicitly from `dbs` (populated by `dbs.txt` by default) and do _not_ need to be explicitly specified.
