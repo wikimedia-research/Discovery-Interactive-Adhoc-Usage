@@ -27,3 +27,4 @@ Analyses/Pageviews Rise/figures/top10.pdf
 
 *.RData
 *_cache
+*.html

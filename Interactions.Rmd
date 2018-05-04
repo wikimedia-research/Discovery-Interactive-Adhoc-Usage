@@ -1,6 +1,6 @@
 ---
 params:
-  days: 120
+  days: 90
 title: "Interactions with Wikimedia Maps on Wikimedia projects"
 author: "MPopov (WMF)"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
@@ -18,18 +18,6 @@ library(printr)
 library(magrittr)
 library(ggplot2)
 ```
-```{css fonts, echo=FALSE}
-@import url('https://fonts.googleapis.com/css?family=Source+Code+Pro|Source+Sans+Pro|Source+Serif+Pro');
-body, p {
-  font-family: 'Source Serif Pro', serif;
-}
-pre, code {
-  font-family: 'Source Code Pro', monospace;
-}
-table, tr, td, h1, h2, h3, h4, h5, h6 {
-  font-family: 'Source Sans Pro', sans-serif;
-}
-```
 This is a report on user interactions with [Wikimedia Maps](https://www.mediawiki.org/wiki/Maps) usage across [Wikimedia Projects](https://wikimediafoundation.org/wiki/Our_projects) via [Schema:Kartographer](https://meta.wikimedia.org/wiki/Schema:Kartographer) event logging implemented by [Julien Girault](https://meta.wikimedia.org/wiki/User:JGirault_(WMF)) (see [T163139](https://phabricator.wikimedia.org/T163139) for more details). It is a companion to the report on _[Wikimedia Maps usage on Wikimedia projects](https://people.wikimedia.org/~bearloga/reports/maps-usage.html)_.
 
 ## Data
@@ -37,7 +25,7 @@ This is a report on user interactions with [Wikimedia Maps](https://www.mediawik
 ```{r connect, eval=TRUE, echo=FALSE}
 # https://people.wikimedia.org/~bearloga/notes/rnotebook-eventlogging.html
 library(RMySQL)
-con <- dbConnect(MySQL(), host = "127.0.0.1", group = "client", dbname = "log", port = 3307)
+con <- dbConnect(MySQL(), host = "127.0.0.1", group = "client", dbname = "log", port = 3308)
 knitr::opts_chunk$set(connection = con)
 ```
 ```{r build_query, echo=FALSE}
@@ -60,8 +48,8 @@ query <- glue::glue("SELECT
   event_userToken AS user_token
 FROM Kartographer_16132745
 WHERE
-  LEFT(TIMESTAMP, 8) >= '{start_date}'
-  AND LEFT(timestamp, 8) <= '{end_date}'")
+  timestamp >= '{start_date}'
+  AND timestamp <= '{end_date}'")
 ```
 ```{sql query, code=query, eval=FALSE, echo=TRUE}
 ```
@@ -71,7 +59,7 @@ results <- wmf::mysql_read(query, "log", con)
 ```{r disconnect, eval=TRUE, include=FALSE}
 dbDisconnect(con)
 ```
-```{r process, eval=TRUE, cache=TRUE}
+```{r process, eval=TRUE, cache=TRUE, dependson='fetch'}
 results$first_interaction <- results$first_interaction == 1
 results$fullscreen <- results$fullscreen == 1
 results$mobile <- results$mobile == 1
@@ -115,7 +103,7 @@ results$type <- polloi::capitalize_first_letter(results$type)
 results$type[results$type == "NANA"] <- NA
 results <- results[order(results$wiki, results$user_token, results$ts), ]
 ```
-```{r data.table}
+```{r data.table, cache=TRUE, dependson='process'}
 lang_proj <- polloi::get_langproj() # polloi::update_prefixes()
 results <- dplyr::left_join(
   results,
@@ -127,13 +115,11 @@ rm(results, lang_proj) # cleanup
 ```
 ```{r summary}
 seshs <- events[, list(events = .N),
-                by = c("feature", "language", "project", "date", "mobile", "user_token")] %>%
-  .[, list(
+                by = c("feature", "language", "project", "date", "mobile", "user_token")][, list(
     sessions = .N,
     events = sum(events),
     mobile_prop = mean(mobile)
-  ), by = c("feature", "language", "project", "date")] %>%
-  .[, list(
+  ), by = c("feature", "language", "project", "date")][, list(
     total = sum(sessions),
     `sessions/day` = as.double(median(sessions)),
     `% of sessions on mobile` = median(mobile_prop),
@@ -162,8 +148,11 @@ DT::datatable(
 ## Interactions
 
 ```{r activations}
-events[feature == "mapframe", list(activated = any(event == "activate")), by = c("date", "user_token")] %>%
-  .[, list(activated = 100 * sum(activated) / .N), by = c("date")] %>%
+events[
+  feature == "mapframe",
+  list(activated = any(event == "activate")),
+  by = c("date", "user_token")
+  ][, list(activated = 100 * sum(activated) / .N), by = c("date")] %>%
   { xts::xts(.[, -1], order.by = .$date) } %>%
   dygraphs::dygraph(
     xlab = "Date", ylab = "% of sessions",
@@ -186,10 +175,12 @@ events[feature == "mapframe", list(activated = any(event == "activate")), by = c
 Each point in the graph below is a rolling average of 7 days to better show trends, but if you would like to see the raw daily data you can adjust the number in the bottom left corner.
 
 ```{r sidebar_show}
-events[!project %in% c("MediaWiki", "Wikimedia Chapter", "Wikimedia Foundation wiki", "Wikinews", "Wiktionary", "Meta wiki", "Wikidata"),
-       list(interacted = any(event %in% c("sidebar-hide", "sidebar-type", "sidebar-click"))),
-       by = c("project", "wiki", "user_token", "date")] %>%
-  .[, list(`% interacted` = 100 * sum(interacted) / .N), by = c("date", "project")] %>%
+events[
+  !project %in% c("MediaWiki", "Wikimedia Chapter", "Wikimedia Foundation wiki", "Wikinews", "Wiktionary", "Meta wiki", "Wikidata"),
+  list(interacted = any(event %in% c("sidebar-hide", "sidebar-type", "sidebar-click"))),
+  by = c("project", "wiki", "user_token", "date")
+  ][, list(`% interacted` = 100 * sum(interacted) / .N),
+    by = c("date", "project")] %>%
   tidyr::spread(project, `% interacted`, fill = 0) %>%
   { xts::xts(.[, -1], order.by = .$date) } %>%
   dygraphs::dygraph(
@@ -213,8 +204,7 @@ events[!project %in% c("MediaWiki", "Wikimedia Chapter", "Wikimedia Foundation w
 DT::datatable(
   events[!is.na(type) & !is.na(service),
          list(sessions = data.table::uniqueN(.SD$user_token)),
-         by = c("date", "type", "service")] %>%
-    .[, list(`sessions/day` = ceiling(median(sessions))), by = c("type", "service")] %>%
+         by = c("date", "type", "service")][, list(`sessions/day` = ceiling(median(sessions))), by = c("type", "service")] %>%
     tidyr::spread(type, `sessions/day`, fill = 0),
   caption = paste("This table shows the median number of sessions per day that have clicked on external services (from the last", params$days, "days)."),
   filter = "top",
@@ -234,7 +224,7 @@ DT::datatable(
 
 ![Map of Amsterdam from English Wikivoyage with Mapnik as the base, external layer.](figures/external_layers.png)
 
-```{r external_layers, cache=TRUE, fig.width=8}
+```{r external_layers, fig.width=8}
 n_sessions <- data.table::uniqueN(events[date >= "2017-08-04", c("wiki", "user_token")])
 external_layers <- events[
   grepl("exlayer$", event) &
@@ -242,8 +232,7 @@ external_layers <- events[
     date >= "2017-08-04",
   list(events = .N),
   by = c("wiki", "user_token", "layer", "event")
-  ] %>%
-  .[, list(
+  ][, list(
     sessions = length(unique(user_token)) / n_sessions
   ), by = c("event", "layer")] %>%
   dplyr::mutate(event = dplyr::case_when(
@@ -300,13 +289,3 @@ DT::datatable(
 ```
 
 Maps on Commons (mapframes specifically) help users discover new content more than on other wikis.
-
-# Appendix
-
-## Setup
-
-This report was compiled using [RMarkdown](http://rmarkdown.rstudio.com/), [knitr](https://yihui.name/knitr/), and an open SSH tunnel for connecting to our databases:
-
-```
-ssh -N stat6 -L 3307:analytics-store.eqiad.wmnet:3306
-```

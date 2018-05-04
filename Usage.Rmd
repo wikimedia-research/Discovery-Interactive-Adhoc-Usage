@@ -1,4 +1,22 @@
 ---
+params:
+  dbs: db.txt
+  mapframe_enabled_wikipedias:
+    - cawiki
+    - cswiki
+    - euwiki
+    - fiwiki
+    - frwiki
+    - hewiki
+    - mkwiki
+    - nowiki
+    - ptwiki
+    - ruwiki
+    - svwiki
+  mapframe_enabled_wikis:
+    - metawiki
+    - mediawikiwiki
+    - uawikimedia
 title: "Wikimedia Maps usage on Wikimedia projects"
 author: "MPopov (WMF)"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
@@ -10,30 +28,22 @@ output:
     toc: yes
     code_folding: hide
 ---
+```{r}
+str(params)
+```
 ```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
 knitr::opts_chunk$set(message = FALSE, warning = FALSE)
 library(printr)
 library(magrittr)
 library(RMySQL)
-dbs <- readr::read_lines("db.txt")
+today <- format(Sys.Date(), "%d %B %Y")
+dbs <- readr::read_lines(params$dbs) # dbs is a list of databases in analytics-store
 language_projects <- polloi::get_langproj()
 language_projects <- paste0(
   ifelse(is.na(language_projects$language), "", paste0(language_projects$language, " ")),
   language_projects$project
 ) %>%
   set_names(language_projects$wikiid)
-```
-```{css fonts, echo=FALSE}
-@import url('https://fonts.googleapis.com/css?family=Source+Code+Pro|Source+Sans+Pro|Source+Serif+Pro');
-body, p {
-  font-family: 'Source Serif Pro', serif;
-}
-pre, code {
-  font-family: 'Source Code Pro', monospace;
-}
-table, tr, td, h1, h2, h3, h4, h5, h6 {
-  font-family: 'Source Sans Pro', sans-serif;
-}
 ```
 This is a report on [Wikimedia Maps](https://www.mediawiki.org/wiki/Maps) usage across [Wikimedia Projects](https://wikimediafoundation.org/wiki/Our_projects).
 
@@ -65,8 +75,8 @@ Let's count how many articles on those wikis have mapframes. Some articles have 
 ```{r mapframes_data, cache=TRUE}
 # dbs is a list of databases in analytics-store
 wikivoyages <- grep("voyage$", dbs, value = TRUE)
-wikipedias <- c("cawiki", "hewiki", "ruwiki", "mkwiki", "frwiki", "fiwiki", "nowiki", "svwiki", "ptwiki", "cswiki", "euwiki")
-other_projects <- c("metawiki", "mediawikiwiki", "uawikimedia")
+wikipedias <- params$mapframe_enabled_wikipedias
+other_projects <- params$mapframe_enabled_wikis
 query <- "SELECT
   COUNT(*) AS `total articles`,
   SUM(IF(mapframes > 0, 1, 0)) AS `articles with a mapframe`,
@@ -98,7 +108,7 @@ mapframes <- dplyr::bind_rows(mapframes)
 rownames(mapframes) <- language_projects[c(wikivoyages, wikipedias, other_projects)]
 ```
 
-Below are the results as of 11 September 2017:
+Below are the results as of `r today`:
 
 ```{r mapframes_table}
 DT::datatable(
@@ -165,7 +175,7 @@ maplinks <- dplyr::bind_rows(maplinks)
 rownames(maplinks) <- language_projects[wikis]
 ```
 
-Below are the results as of 11 September 2017:
+Below are the results as of `r today`:
 
 ```{r maplinks_table}
 DT::datatable(
@@ -265,7 +275,7 @@ Let's see how many of those there are:
 con <- dbConnect(MySQL(), host = "127.0.0.1", group = "client", dbname = "commonswiki", port = 3307)
 ```
 
-(Query run on 11 September 2017.)
+(Query run on `r today`.)
 
 ```{sql commons_query, connection=con, cache=TRUE}
 SELECT
@@ -301,7 +311,7 @@ LEFT JOIN (
 ON geo_tagged.gt_page_id = p.page_id;
 ```
 
-One way to consider usage is how many pages are geo-tagged vs not (query run on 11 September 2017):
+One way to consider usage is how many pages are geo-tagged vs not (query run on `r today`):
 
 ```{sql geo_tags, connection=con, cache=TRUE}
 SELECT
@@ -337,7 +347,7 @@ __\*__ This is actually overcounting because there is a known issue ([T143366](h
 
 ![**Left**: an example of a photo (by [User:Nenntmichruhigip](https://commons.wikimedia.org/wiki/User:Nenntmichruhigip), available under [Free Art License](https://en.wikipedia.org/wiki/en:Free_Art_License)) having a mapframe. **Right**: an example of a photo (by [Andre Engels](https://commons.wikimedia.org/wiki/User:Andre_Engels), available under Creative Commons [Attribution 1.0 Generic](https://creativecommons.org/licenses/by/1.0/deed.en) license) with a camera location attached, resulting in a maplink.](figures/commons.png)
 
-(Query run on 11 September 2017.)
+(Query run on `r today`.)
 
 ```{sql commons_map_prevalence, connection=con, cache=TRUE}
 SELECT
@@ -378,21 +388,11 @@ FROM (
 ) counts;
 ```
 
-Approximately 17% (~9.8M) of 57.1M files on Commons include a maplink.
-
 ```{r commons_disconnect, echo=FALSE}
 invisible(dbDisconnect(con))
 ```
 
 # Appendix
-
-## Setup
-
-This report was compiled using [RMarkdown](http://rmarkdown.rstudio.com/), [knitr](https://yihui.name/knitr/), and an open SSH tunnel for connecting to our databases:
-
-```
-ssh -N stat6 -L 3307:analytics-store.eqiad.wmnet:3306
-```
 
 ## Notes
 
